@@ -16,7 +16,7 @@ def recv_all(channel):
         time.sleep(0.1)
     stdout = ''
     while channel.recv_ready():
-        stdout += channel.recv(1024)
+        stdout += channel.recv(1024).decode()
     return stdout
 
 
@@ -36,7 +36,7 @@ class MockF5TestCase(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
-        print "tearDownClass"
+        print("tearDownClass")
         MockSSH.stopThreadedServer()
         shutil.rmtree(cls.keypath)
 

@@ -15,9 +15,10 @@ from twisted.conch.insults import insults
 from twisted.conch.openssh_compat import primes
 from twisted.conch.ssh import (connection, factory, keys, session, transport,
                                userauth)
-from twisted.cred import checkers, portal
+from twisted.cred import portal, credentials
+from twisted.cred.checkers import InMemoryUsernamePasswordDatabaseDontUse, ICredentialsChecker
 from twisted.internet import reactor
-from zope.interface import implements
+from zope.interface import implementer
 
 __all__ = ("SSHCommand", "PromptingCommand", "ArgumentValidatingCommand",
            "runServer", "startThreadedServer", "stopThreadedServer")
@@ -57,19 +58,19 @@ class SSHCommand(object):
         self.exit()
 
     def call(self):
-        self.protocol.writeln('Hello World! [%s]' % repr(self.args))
+        self.protocol.writeln("Hello World! [{}]".format(repr(self.args)))
 
     def exit(self):
         self.protocol.cmdstack.pop()
         self.protocol.cmdstack[-1].resume()
 
     def ctrl_c(self):
-        print 'Received CTRL-C, exiting..'
+        print("Received CTRL-C, exiting..")
         self.writeln('^C')
         self.exit()
 
     def lineReceived(self, line):
-        print 'INPUT: %s' % line
+        print("INPUT: {}".format(line))
 
     def resume(self):
         pass
@@ -100,7 +101,7 @@ class PromptingCommand(SSHCommand):
         self.protocol.password_input = True
 
     def lineReceived(self, line):
-        self.validate_password(line.strip())
+        self.validate_password(line.decode().strip())
 
     def validate_password(self, password):
         if password == self.valid_password:
@@ -142,8 +143,8 @@ class SSHShell(object):
         self.cmdpending = []
 
     def lineReceived(self, line):
-        print 'CMD: %s' % line
-        for i in [x.strip() for x in line.strip().split(';')]:
+        print("CMD: {}".format(line))
+        for i in [x.strip() for x in line.decode().strip().split(';')]:
             if not len(i):
                 continue
             self.cmdpending.append(i)
@@ -192,12 +193,12 @@ class SSHShell(object):
 
         cmdclass = self.protocol.getCommand(cmd)
         if cmdclass:
-            print 'Command found: %s' % (line,)
+            print("Command found: {}".format(line))
             self.protocol.call_command(cmdclass, *rargs)
         else:
-            print 'Command not found: %s' % (line,)
+            print("Command not found: {}".format(line))
             if len(line):
-                self.protocol.writeln('MockSSH: %s: command not found' % cmd)
+                self.protocol.writeln("MockSSH: {}: command not found".format(cmd))
                 runOrPrompt()
 
     def resume(self):
@@ -228,8 +229,6 @@ class SSHProtocol(recvline.HistoricRecvLine):
 
         transport = self.terminal.transport.session.conn.transport
         transport.factory.sessions[transport.transport.sessionno] = self
-        # p = self.terminal.transport.session.conn.transport.transport.getPeer()
-        # self.client_ip = p.host
 
         self.keyHandlers.update({
             '\x04': self.handle_CTRL_D,
@@ -276,7 +275,7 @@ class SSHProtocol(recvline.HistoricRecvLine):
     def handle_RETURN(self):
         if len(self.cmdstack) == 1:
             if self.lineBuffer:
-                self.historyLines.append(''.join(self.lineBuffer))
+                self.historyLines.append(''.join([x.decode() for x in self.lineBuffer]))
             self.historyPosition = len(self.historyLines)
         return recvline.HistoricRecvLine.handle_RETURN(self)
 
@@ -294,8 +293,8 @@ class SSHProtocol(recvline.HistoricRecvLine):
         self.call_command(self.commands['_exit'])
 
 
+@implementer(conchinterfaces.ISession)
 class SSHAvatar(avatar.ConchUser):
-    implements(conchinterfaces.ISession)
 
     def __init__(self, user, prompt, commands):
         avatar.ConchUser.__init__(self)
@@ -304,7 +303,7 @@ class SSHAvatar(avatar.ConchUser):
         self.prompt = prompt
         self.commands = commands
 
-        self.channelLookup.update({'session': session.SSHSession})
+        self.channelLookup.update({b'session': session.SSHSession})
 
     def openShell(self, protocol):
         serverProtocol = insults.ServerProtocol(SSHProtocol, self, self.prompt,
@@ -326,8 +325,8 @@ class SSHAvatar(avatar.ConchUser):
         pass
 
 
+@implementer(portal.IRealm)
 class SSHRealm:
-    implements(portal.IRealm)
 
     def __init__(self, prompt, commands):
         self.prompt = prompt
@@ -346,10 +345,11 @@ class SSHTransport(transport.SSHServerTransport):
     hadVersion = False
 
     def connectionMade(self):
-        print 'New connection: %s:%s (%s:%s) [session: %d]' % \
-            (self.transport.getPeer().host, self.transport.getPeer().port,
-             self.transport.getHost().host, self.transport.getHost().port,
-             self.transport.sessionno)
+        print("New connection: {}:{} ({}:{}) [session: {}]".format(self.transport.getPeer().host,
+                                                                   self.transport.getPeer().port,
+                                                                   self.transport.getHost().host,
+                                                                   self.transport.getHost().port,
+                                                                   self.transport.sessionno))
         self.interactors = []
         self.ttylog_open = False
         transport.SSHServerTransport.connectionMade(self)
@@ -364,7 +364,7 @@ class SSHTransport(transport.SSHServerTransport):
         transport.SSHServerTransport.dataReceived(self, data)
 
     def ssh_KEXINIT(self, packet):
-        print 'Remote SSH version: %s' % (self.otherVersionString,)
+        print("Remote SSH version: {}".format(self.otherVersionString))
         return transport.SSHServerTransport.ssh_KEXINIT(self, packet)
 
     # this seems to be the only reliable place of catching lost connection
@@ -385,8 +385,8 @@ class SSHFactory(factory.SSHFactory):
         _modulis = '/etc/ssh/moduli', '/private/etc/moduli'
 
         t = SSHTransport()
-        t.ourVersionString = "SSH-2.0-OpenSSH_Mock MockSSH.py"
-        t.supportedPublicKeys = self.privateKeys.keys()
+        t.ourVersionString = b'SSH-2.0-OpenSSH_Mock MockSSH.py'
+        t.supportedPublicKeys = list(self.privateKeys.keys())
 
         for _moduli in _modulis:
             try:
@@ -411,10 +411,31 @@ class command_exit(SSHCommand):
         self.protocol.terminal.loseConnection()
 
 
+@implementer(ICredentialsChecker)
+class SSHICredentialsChecker(object):
+    credentialInterfaces = (credentials.IUsernamePassword,
+                            credentials.IUsernameHashedPassword)
+
+    def __init__(self, **users):
+        self.users = {
+            k.encode() if isinstance(k, str) else k:
+                v.encode() if isinstance(v, str) else v
+            for k, v in users.items()
+        }
+
+    def addUser(self, username, password):
+        pass
+
+    def _cbPasswordMatch(self, matched, username):
+        pass
+
+    def requestAvatarId(self, credentials):
+        pass
+
 # Functions
 def getRSAKeys(keypath="."):
     if not os.path.exists(keypath):
-        print "Could not find specified keypath (%s)" % keypath
+        print("Could not find specified keypath ({})".format(keypath))
         sys.exit(1)
 
     pubkey = os.path.join(keypath, "public.key")
@@ -430,16 +451,20 @@ def getRSAKeys(keypath="."):
 
         rsaKey = RSA.generate(KEY_LENGTH, randbytes.secureRandom)
 
-        publicKeyString = keys.Key(rsaKey).public().toString('openssh')
-        privateKeyString = keys.Key(rsaKey).toString('openssh')
+        publicKeyString = rsaKey.exportKey('OpenSSH')
+        privateKeyString = rsaKey.exportKey()
 
-        file(pubkey, 'w+b').write(publicKeyString)
-        file(privkey, 'w+b').write(privateKeyString)
+        with open(pubkey, 'w+b') as f:
+            f.write(publicKeyString)
+        with open(privkey, 'w+b') as f:
+            f.write(privateKeyString)
 
         sys.stdout.write("Done.\n")
     else:
-        publicKeyString = file(pubkey).read()
-        privateKeyString = file(privkey).read()
+        with open(pubkey, 'r') as f:
+            publicKeyString = f.read()
+        with open(privkey, 'r') as f:
+            privateKeyString = f.read()
 
     return publicKeyString, privateKeyString
 
@@ -465,18 +490,17 @@ def getSSHFactory(commands, prompt, keypath, **users):
     sshFactory.portal = portal.Portal(
         SSHRealm(
             prompt=prompt, commands=commands))
-    sshFactory.portal.registerChecker(
-        checkers.InMemoryUsernamePasswordDatabaseDontUse(**users))
+    sshFactory.portal.registerChecker(SSHICredentialsChecker(**users))
 
     pubKeyString, privKeyString = getRSAKeys(keypath)
 
-    sshFactory.publicKeys = {'ssh-rsa': keys.Key.fromString(data=pubKeyString)}
+    sshFactory.publicKeys = {b'ssh-rsa': keys.Key.fromString(data=pubKeyString)}
     sshFactory.privateKeys = {
-        'ssh-rsa': keys.Key.fromString(data=privKeyString)
+        b'ssh-rsa': keys.Key.fromString(data=privKeyString)
     }
     sshFactory.services = {
-        'ssh-userauth': userauth.SSHUserAuthServer,
-        'ssh-connection': connection.SSHConnection
+        b'ssh-userauth': userauth.SSHUserAuthServer,
+        b'ssh-connection': connection.SSHConnection
     }
 
     return sshFactory

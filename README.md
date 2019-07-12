@@ -1,7 +1,11 @@
 MockSSH
 =======
 
-Mock an SSH server and all commands it supports.
+Fork of "Mock an SSH server and all commands it supports." to make it compatible with python 3.4+
+
+https://github.com/ncouture/MockSSH
+
+
 
 
 Purpose
